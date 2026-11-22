@@ -22,7 +22,7 @@
     }
     header h1 { font-size: 1.1rem; }
     header span { font-size: 0.85rem; margin-right: 14px; opacity: 0.9; }
-    button {
+    header button {
       background: #fff;
       color: #0f766e;
       border: none;
@@ -31,8 +31,53 @@
       cursor: pointer;
       font-size: 0.85rem;
     }
-    main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-    .panel { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 16px; }
+    .filters label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 3px; }
+    .filters input, .filters select {
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+    .filters button {
+      padding: 9px 14px;
+      border: 1px solid #0f766e;
+      background: #fff;
+      color: #0f766e;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .count { font-size: 0.85rem; color: #64748b; margin-bottom: 10px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    th { font-size: 0.75rem; text-transform: uppercase; color: #64748b; }
+    .badge { padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; }
+    .confirmed { background: #dbeafe; color: #1e40af; }
+    .completed { background: #dcfce7; color: #166534; }
+    .cancelled { background: #fee2e2; color: #991b1b; }
+    .act {
+      padding: 5px 10px;
+      margin-right: 4px;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .act:hover { background: #f1f5f9; }
+    #msg { margin: 10px 0; font-size: 0.85rem; min-height: 1.2em; }
+    .error { color: #991b1b; }
+    .empty { padding: 20px 8px; color: #64748b; }
   </style>
 </head>
 <body>
@@ -46,22 +91,187 @@
 
   <main>
     <div class="panel">
-      <h2>Bookings</h2>
-      <p style="margin-top:8px;color:#64748b;">The bookings table will appear here in the next step.</p>
+      <div class="filters">
+        <div>
+          <label for="fDate">Date</label>
+          <input id="fDate" type="date">
+        </div>
+        <div>
+          <label for="fDoctor">Doctor</label>
+          <select id="fDoctor"><option value="">All doctors</option></select>
+        </div>
+        <div>
+          <label for="fStatus">Status</label>
+          <select id="fStatus">
+            <option value="">All</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <button id="clear" type="button">Clear</button>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+
+      <p class="count" id="count"></p>
+      <p id="msg"></p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Patient</th><th>Phone</th><th>Doctor</th>
+              <th>Date</th><th>Time</th><th>Status</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
   <script>
-    async function init() {
-      const response = await fetch("/staff/me");
-      if (!response.ok) {
-        window.location.href = "/staff/login";
-        return;
-      }
-      const data = await response.json();
-      document.getElementById("who").textContent = "Logged in as " + data.username;
+    const rowsEl = document.getElementById("rows");
+    const countEl = document.getElementById("count");
+    const msgEl = document.getElementById("msg");
+    const fDate = document.getElementById("fDate");
+    const fDoctor = document.getElementById("fDoctor");
+    const fStatus = document.getElementById("fStatus");
+
+    function showMessage(text, isError) {
+      msgEl.textContent = text;
+      msgEl.className = isError ? "error" : "";
     }
 
+    // Every call goes through here: if the login has expired, go to the login page
+    async function api(url, options) {
+      const response = await fetch(url, options);
+      if (response.status === 401) {
+        window.location.href = "/staff/login";
+        throw new Error("Not logged in");
+      }
+      return response;
+    }
+
+    function makeCell(text) {
+      const td = document.createElement("td");
+      td.textContent = text; // textContent keeps patient-typed text from running as HTML
+      return td;
+    }
+
+    function makeButton(label, onClick) {
+      const b = document.createElement("button");
+      b.className = "act";
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    async function changeStatus(id, status) {
+      showMessage("", false);
+      const response = await api("/staff/api/bookings/" + id + "/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        showMessage(data.detail || "Could not update.", true);
+        return;
+      }
+      loadBookings();
+    }
+
+    function renderRows(bookings) {
+      rowsEl.innerHTML = "";
+      countEl.textContent = bookings.length + " booking" + (bookings.length === 1 ? "" : "s");
+
+      if (bookings.length === 0) {
+        const tr = document.createElement("tr");
+        const td = makeCell("No bookings found.");
+        td.colSpan = 8;
+        td.className = "empty";
+        tr.appendChild(td);
+        rowsEl.appendChild(tr);
+        return;
+      }
+
+      bookings.forEach((b) => {
+        const tr = document.createElement("tr");
+        tr.appendChild(makeCell(b.id));
+        tr.appendChild(makeCell(b.patient_name));
+        tr.appendChild(makeCell(b.patient_phone));
+        tr.appendChild(makeCell(b.doctor));
+        tr.appendChild(makeCell(b.appointment_date));
+        tr.appendChild(makeCell(b.appointment_time));
+
+        const statusTd = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = "badge " + b.status;
+        badge.textContent = b.status;
+        statusTd.appendChild(badge);
+        tr.appendChild(statusTd);
+
+        const actionTd = document.createElement("td");
+        if (b.status === "confirmed") {
+          actionTd.appendChild(makeButton("Complete", () => changeStatus(b.id, "completed")));
+          actionTd.appendChild(makeButton("Cancel", () => {
+            if (confirm("Cancel booking #" + b.id + " for " + b.patient_name + "?")) {
+              changeStatus(b.id, "cancelled");
+            }
+          }));
+        } else if (b.status === "cancelled") {
+          actionTd.appendChild(makeButton("Reopen", () => changeStatus(b.id, "confirmed")));
+        }
+        tr.appendChild(actionTd);
+
+        rowsEl.appendChild(tr);
+      });
+    }
+
+    async function loadBookings() {
+      const params = new URLSearchParams();
+      if (fDate.value) params.set("date", fDate.value);
+      if (fDoctor.value) params.set("doctor", fDoctor.value);
+      if (fStatus.value) params.set("status", fStatus.value);
+
+      try {
+        const response = await api("/staff/api/bookings?" + params.toString());
+        if (!response.ok) {
+          const data = await response.json();
+          showMessage(data.detail || "Could not load bookings.", true);
+          return;
+        }
+        renderRows(await response.json());
+      } catch (err) {
+        if (err.message !== "Not logged in") showMessage("Cannot reach the server.", true);
+      }
+    }
+
+    async function init() {
+      const me = await api("/staff/me");
+      const user = await me.json();
+      document.getElementById("who").textContent = "Logged in as " + user.username;
+
+      const doctors = await (await api("/staff/api/doctors")).json();
+      doctors.forEach((name) => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        fDoctor.appendChild(opt);
+      });
+
+      loadBookings();
+    }
+
+    [fDate, fDoctor, fStatus].forEach((el) => el.addEventListener("change", loadBookings));
+    document.getElementById("refresh").addEventListener("click", loadBookings);
+    document.getElementById("clear").addEventListener("click", () => {
+      fDate.value = "";
+      fDoctor.value = "";
+      fStatus.value = "";
+      loadBookings();
+    });
     document.getElementById("logout").addEventListener("click", async () => {
       await fetch("/staff/logout", { method: "POST" });
       window.location.href = "/staff/login";

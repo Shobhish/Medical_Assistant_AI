@@ -1,3 +1,9 @@
+from datetime import datetime
+from database.staff_queries import (
+    list_appointments,
+    list_doctor_names,
+    update_appointment_status,
+)
 import os
 import time
 import traceback
@@ -157,3 +163,40 @@ def staff_dashboard(request: Request):
     if not request.session.get("staff_user"):
         return RedirectResponse(url="/staff/login", status_code=303)
     return FileResponse(BASE_DIR / "static" / "staff_dashboard.html")
+    
+    # ---------- Staff API (every route checks the login) ----------
+class StatusUpdate(BaseModel):
+    status: str
+
+
+@app.get("/staff/api/bookings")
+def staff_bookings(
+    request: Request,
+    date: str | None = None,
+    doctor: str | None = None,
+    status: str | None = None,
+):
+    require_staff(request)
+
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD.")
+
+    return list_appointments(date or None, doctor or None, status or None)
+
+
+@app.get("/staff/api/doctors")
+def staff_doctors(request: Request):
+    require_staff(request)
+    return list_doctor_names()
+
+
+@app.post("/staff/api/bookings/{appointment_id}/status")
+def staff_update_status(appointment_id: int, data: StatusUpdate, request: Request):
+    require_staff(request)
+    result = update_appointment_status(appointment_id, data.status)
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
