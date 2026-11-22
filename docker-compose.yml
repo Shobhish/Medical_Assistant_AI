@@ -17,5 +17,18 @@ services:
       timeout: 5s
       retries: 5
 
+  n8n:
+    image: n8nio/n8n
+    container_name: mediassist-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
+    volumes:
+      - n8n_data:/home/node/.n8n
+
 volumes:
   postgres_data:
+  n8n_data:

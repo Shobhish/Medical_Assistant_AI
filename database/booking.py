@@ -1,4 +1,7 @@
+import json
+import os
 import re
+import urllib.request
 from datetime import date, datetime, timedelta
 
 from psycopg2 import errors
@@ -6,6 +9,23 @@ from psycopg2 import errors
 from database.queries import get_connection, run_query
 
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def notify_n8n(booking: dict) -> None:
+    """Send the booking to n8n. A failure here must never break the booking."""
+    url = os.getenv("N8N_WEBHOOK_URL")
+    if not url:
+        return
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(booking).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(request, timeout=3).close()
+    except Exception as e:
+        print(f"[n8n] notification failed: {e}")
 
 
 def parse_days(text):
@@ -134,7 +154,7 @@ def book_appointment(
     finally:
         connection.close()
 
-    return {
+    result = {
         "success": True,
         "appointment_id": appointment_id,
         "patient_name": name,
@@ -142,3 +162,6 @@ def book_appointment(
         "date": day.strftime("%A, %d %B %Y"),
         "time": slot.strftime("%I:%M %p"),
     }
+    # Tell n8n about the new booking (never breaks the booking if it fails)
+    notify_n8n({**result, "patient_phone": patient_phone.strip()})
+    return result
