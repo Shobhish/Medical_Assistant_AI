@@ -2,6 +2,10 @@
 
 A hospital website with an AI assistant. Patients can browse doctors, departments and services, ask questions in a chat, and book appointments. Hospital staff log in to see bookings and manage doctors and services. Answers come from a PostgreSQL database, and the replies are written by Google Gemini.
 
+**Live demo:** https://medical-assistant-ai-h9y8.onrender.com
+
+> The demo runs on free hosting, so the first load can take up to a minute while it wakes up. It uses made-up data only. Please don't enter real personal information.
+
 > This is a learning project with made-up sample data (doctors, prices, timings). It is not a real hospital and not a substitute for medical advice.
 
 ## Screenshots
@@ -40,7 +44,6 @@ A hospital website with an AI assistant. Patients can browse doctors, department
 
 **For staff**
 - Staff login with hashed passwords (bcrypt) and a signed session cookie
-- Login attempt limit (5 failed attempts in 5 minutes)
 - Bookings dashboard with filters by date, doctor and status, and buttons to complete, cancel or reopen a booking
 - Admin pages to add, edit and delete doctors and services
 - Changes made by staff appear in the chatbot and on the home page straight away
@@ -49,16 +52,17 @@ A hospital website with an AI assistant. Patients can browse doctors, department
 **Other**
 - Falls back to other Gemini models if one is busy or out of quota
 - Every conversation is saved in a `chat_history` table
-- New bookings are sent to an n8n webhook (optional)
+- New bookings are sent to an n8n webhook (optional, runs locally)
 
 ## Tech stack
 
 - **Backend:** Python, FastAPI
-- **Database:** PostgreSQL 17 (Docker)
+- **Database:** PostgreSQL 17 (Docker locally, Neon in production)
 - **AI:** Google Gemini API (`google-genai` SDK)
 - **Frontend:** HTML, CSS, JavaScript
 - **Security:** bcrypt, signed session cookies, parameterised SQL
-- **Automation:** n8n (Docker)
+- **Automation:** n8n (Docker, optional)
+- **Hosting:** Render (web service) and Neon (serverless PostgreSQL)
 
 ## How it works
 
@@ -66,7 +70,7 @@ A hospital website with an AI assistant. Patients can browse doctors, department
 2. The backend loads the hospital data (departments, doctors, services, FAQs) and the recent messages of that session.
 3. Gemini writes the reply using that data and a set of safety rules.
 4. For a booking, Gemini collects the details, asks the patient to confirm, then calls the `book_appointment` function. The function validates everything and saves the appointment, so Gemini cannot book an invalid slot.
-5. The backend saves the messages in `chat_history` and sends the new booking to n8n.
+5. The backend saves the messages in `chat_history` and sends the new booking to n8n, if configured.
 6. Staff log in, see the booking on the dashboard, and manage doctors and services.
 
 Gemini only receives public hospital data. Appointments and patient details are never sent to it.
@@ -90,7 +94,7 @@ Medical_Health_Assistant/
 ├── app.py                  # FastAPI app: chat, staff login, bookings, doctors
 ├── routes_services.py      # Staff: manage services
 ├── routes_public.py        # Public data for the home page
-├── docker-compose.yml      # PostgreSQL and n8n
+├── docker-compose.yml      # PostgreSQL and n8n for local use
 ├── requirements.txt
 ├── .env.example            # Template for your settings
 ├── static/
@@ -118,7 +122,7 @@ Medical_Health_Assistant/
 └── assets/                 # Screenshots
 ```
 
-## Setup
+## Setup (local)
 
 **Requirements:** Python 3.10 or newer, Docker Desktop, and a Gemini API key from Google AI Studio.
 
@@ -163,6 +167,16 @@ To try the chatbot in the terminal instead, run `python -m services.chatbot`.
 
 **Optional: n8n.** Run `docker compose up -d n8n`, open http://localhost:5678, create a workflow with a Webhook node (POST, path `new-booking`), and publish it. New bookings are then posted to it automatically.
 
+## Deployment
+
+The live demo runs on Render (free web service) with a Neon PostgreSQL database.
+
+- **Build command:** `pip install -r requirements.txt`
+- **Start command:** `uvicorn app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"`
+- **Environment variables** (set on the host, never committed): `GEMINI_API_KEY`, `GEMINI_MODEL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `PGSSLMODE=require`, `SESSION_SECRET`, `HTTPS_ONLY=true`, `PYTHON_VERSION`
+
+The n8n workflow is optional and only runs locally. If `N8N_WEBHOOK_URL` is not set, the app skips it.
+
 ## Try these in the chat
 
 - `Which doctors are in cardiology?`
@@ -170,12 +184,28 @@ To try the chatbot in the terminal instead, run `python -m services.chatbot`.
 - `I want to book an appointment with Dr. Arun Menon`
 - `I have chest pain` (it should point to the emergency department)
 
+## Security
+
+- Staff passwords are hashed with bcrypt, and sessions use a signed, HTTPS-only cookie
+- Login attempts are limited (5 failures in 5 minutes), and chat messages are limited per visitor
+- Staff API routes check the login on the server, and admin-only routes check the role
+- All SQL uses parameters, which prevents SQL injection
+- Text from the database or from patients is shown with `textContent`, which prevents script injection
+- Gemini only receives public hospital data. Appointments and patient details are never sent to it
+- The booking tool validates every detail itself, so the AI cannot book an invalid slot
+
+## Limitations
+
+- Free hosting sleeps when idle, so the first request is slow
+- The free Gemini quota is shared by all visitors, and the app falls back to other models when one runs out
+- Staff accounts are created by script, and there is no password reset yet
+- Chat messages are sent to the Gemini API, so real patient information should not be entered
+- This is a demo. A real hospital system would also need audit logs, consent handling and a security review
+
 ## Notes
 
 - Keep `.env` private. It is listed in `.gitignore` and must never be committed.
-- The Gemini free tier has daily request limits per model. If one model runs out, the app tries the next one in the list in `services/chatbot.py`.
 - Appointments and chat history store names and phone numbers. Use fake data while testing.
-- Before deploying, set `https_only=True` for the session cookie in `app.py` and serve the site over HTTPS.
 
 ## Roadmap
 
@@ -186,9 +216,10 @@ To try the chatbot in the terminal instead, run `python -m services.chatbot`.
 - [x] Hospital home page with chat widget
 - [x] Staff login and bookings dashboard
 - [x] Admin pages for doctors and services
-- [x] n8n booking webhook
+- [x] n8n booking webhook (local, optional)
+- [x] Deployment (Render and Neon)
 - [ ] Staff notifications (Telegram or email)
-- [ ] Deployment
+- [ ] Read-only staff role and password reset
 
 ## Author
 

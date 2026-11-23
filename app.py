@@ -36,13 +36,14 @@ if not SESSION_SECRET:
 app = FastAPI(title="MediAssist AI")
 
 # Signed cookie that remembers who is logged in.
-# When you deploy with HTTPS, change https_only to True.
+# Locally HTTPS_ONLY is not set, so cookies work over plain http.
+# On the live site set HTTPS_ONLY=true so the cookie is only sent over HTTPS.
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     max_age=60 * 60 * 8,  # 8 hours
     same_site="lax",
-    https_only=False,
+    https_only=os.getenv("HTTPS_ONLY", "false").lower() == "true",
 )
 
 # Extra routes kept in their own files
@@ -60,6 +61,26 @@ def too_many_attempts(ip):
     recent = [t for t in FAILED_LOGINS.get(ip, []) if now - t < WINDOW_SECONDS]
     FAILED_LOGINS[ip] = recent
     return len(recent) >= MAX_ATTEMPTS
+
+
+# ---------- Chat limiter: protects your Gemini quota ----------
+CHAT_LOG = {}
+CHAT_LIMIT = 30        # messages allowed ...
+CHAT_WINDOW = 600      # ... per 10 minutes, per visitor
+MAX_MESSAGE_LENGTH = 1000
+
+
+def chat_limit_reached(ip):
+    now = time.time()
+    if len(CHAT_LOG) > 5000:  # keep memory small
+        CHAT_LOG.clear()
+    recent = [t for t in CHAT_LOG.get(ip, []) if now - t < CHAT_WINDOW]
+    if len(recent) >= CHAT_LIMIT:
+        CHAT_LOG[ip] = recent
+        return True
+    recent.append(now)
+    CHAT_LOG[ip] = recent
+    return False
 
 
 # ---------- Access checks (use these on every staff route) ----------
@@ -118,12 +139,24 @@ def health_check():
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
-    message = request.message.strip()
+def chat(data: ChatRequest, http_request: Request):
+    message = data.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    if len(message) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail="That message is too long. Please keep it under 1000 characters.",
+        )
 
-    session_id = request.session_id or str(uuid.uuid4())
+    ip = http_request.client.host if http_request.client else "unknown"
+    if chat_limit_reached(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="You are sending messages very quickly. Please wait a few minutes and try again.",
+        )
+
+    session_id = data.session_id or str(uuid.uuid4())
 
     try:
         reply = ask(message, session_id)
