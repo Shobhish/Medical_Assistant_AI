@@ -21,6 +21,14 @@
       align-items: center;
     }
     header h1 { font-size: 1.1rem; }
+    header .right { display: flex; align-items: center; }
+    header a {
+      color: #fff;
+      font-size: 0.85rem;
+      margin-right: 16px;
+      text-decoration: none;
+    }
+    header a:hover { text-decoration: underline; }
     header span { font-size: 0.85rem; margin-right: 14px; opacity: 0.9; }
     header button {
       background: #fff;
@@ -83,7 +91,8 @@
 <body>
   <header>
     <h1>MediAssist AI - Staff</h1>
-    <div>
+    <div class="right">
+      <a id="navDoctors" href="/staff/doctors" style="display:none;">Doctors</a>
       <span id="who"></span>
       <button id="logout">Log out</button>
     </div>
@@ -252,6 +261,11 @@
       const me = await api("/staff/me");
       const user = await me.json();
       document.getElementById("who").textContent = "Logged in as " + user.username;
+
+      // Only admins see the link to manage doctors
+      if (user.role === "admin") {
+        document.getElementById("navDoctors").style.display = "inline";
+      }
 
       const doctors = await (await api("/staff/api/doctors")).json();
       doctors.forEach((name) => {

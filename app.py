@@ -1,13 +1,8 @@
-from datetime import datetime
-from database.staff_queries import (
-    list_appointments,
-    list_doctor_names,
-    update_appointment_status,
-)
 import os
 import time
 import traceback
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,6 +13,17 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from services.chatbot import ask
 from database.staff_auth import verify_login
+from database.staff_queries import (
+    list_appointments,
+    list_doctor_names,
+    update_appointment_status,
+    list_departments,
+    list_doctors_full,
+    save_doctor,
+    delete_doctor,
+)
+from routes_services import router as services_router
+from routes_public import router as public_router
 
 load_dotenv()
 
@@ -39,6 +45,10 @@ app.add_middleware(
     https_only=False,
 )
 
+# Extra routes kept in their own files
+app.include_router(services_router)  # staff: manage services
+app.include_router(public_router)    # public: data for the home page
+
 # ---------- Login attempt limiter (simple, in memory) ----------
 FAILED_LOGINS = {}
 MAX_ATTEMPTS = 5
@@ -52,11 +62,19 @@ def too_many_attempts(ip):
     return len(recent) >= MAX_ATTEMPTS
 
 
+# ---------- Access checks (use these on every staff route) ----------
 def require_staff(request: Request):
-    """Use this on every staff-only route."""
     username = request.session.get("staff_user")
     if not username:
         raise HTTPException(status_code=401, detail="Please log in.")
+    return username
+
+
+def require_admin(request: Request):
+    """Like require_staff, but only for accounts with the admin role."""
+    username = require_staff(request)
+    if request.session.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required.")
     return username
 
 
@@ -74,6 +92,18 @@ class ChatResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+class DoctorIn(BaseModel):
+    full_name: str
+    department_id: int
+    qualification: str = ""
+    available_days: str
+    available_time: str
 
 
 # ---------- Public pages and chat ----------
@@ -158,17 +188,24 @@ def staff_me(request: Request):
     return {"username": username, "role": request.session.get("role", "staff")}
 
 
+# ---------- Staff pages ----------
 @app.get("/staff")
 def staff_dashboard(request: Request):
     if not request.session.get("staff_user"):
         return RedirectResponse(url="/staff/login", status_code=303)
     return FileResponse(BASE_DIR / "static" / "staff_dashboard.html")
-    
-    # ---------- Staff API (every route checks the login) ----------
-class StatusUpdate(BaseModel):
-    status: str
 
 
+@app.get("/staff/doctors")
+def staff_doctors_page(request: Request):
+    if not request.session.get("staff_user"):
+        return RedirectResponse(url="/staff/login", status_code=303)
+    if request.session.get("role") != "admin":
+        return RedirectResponse(url="/staff", status_code=303)
+    return FileResponse(BASE_DIR / "static" / "staff_doctors.html")
+
+
+# ---------- Staff API: bookings (every route checks the login) ----------
 @app.get("/staff/api/bookings")
 def staff_bookings(
     request: Request,
@@ -197,6 +234,52 @@ def staff_doctors(request: Request):
 def staff_update_status(appointment_id: int, data: StatusUpdate, request: Request):
     require_staff(request)
     result = update_appointment_status(appointment_id, data.status)
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+# ---------- Staff API: manage doctors (admin only) ----------
+@app.get("/staff/api/manage/departments")
+def manage_departments(request: Request):
+    require_admin(request)
+    return list_departments()
+
+
+@app.get("/staff/api/manage/doctors")
+def manage_doctors_list(request: Request):
+    require_admin(request)
+    return list_doctors_full()
+
+
+@app.post("/staff/api/manage/doctors")
+def manage_doctors_create(data: DoctorIn, request: Request):
+    require_admin(request)
+    result = save_doctor(
+        data.full_name, data.department_id, data.qualification,
+        data.available_days, data.available_time,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.put("/staff/api/manage/doctors/{doctor_id}")
+def manage_doctors_update(doctor_id: int, data: DoctorIn, request: Request):
+    require_admin(request)
+    result = save_doctor(
+        data.full_name, data.department_id, data.qualification,
+        data.available_days, data.available_time, doctor_id=doctor_id,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.delete("/staff/api/manage/doctors/{doctor_id}")
+def manage_doctors_delete(doctor_id: int, request: Request):
+    require_admin(request)
+    result = delete_doctor(doctor_id)
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

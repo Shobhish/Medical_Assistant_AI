@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Manage Doctors - MediAssist AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #eef3f8;
+      color: #1e293b;
+    }
+    header {
+      background: #0f766e;
+      color: #fff;
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { font-size: 1.1rem; }
+    header a { color: #fff; font-size: 0.85rem; margin-right: 16px; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
+    .panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    }
+    h2 { font-size: 1rem; margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 3px; }
+    input, select {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+    .hint { font-size: 0.75rem; color: #64748b; margin-top: 10px; }
+    .buttons { margin-top: 14px; display: flex; gap: 8px; }
+    .primary {
+      background: #0f766e; color: #fff; border: none; border-radius: 8px;
+      padding: 10px 16px; cursor: pointer; font-size: 0.9rem;
+    }
+    .secondary {
+      background: #fff; color: #0f766e; border: 1px solid #0f766e; border-radius: 8px;
+      padding: 10px 16px; cursor: pointer; font-size: 0.9rem;
+    }
+    #msg { margin-top: 10px; font-size: 0.85rem; min-height: 1.2em; }
+    .error { color: #991b1b; }
+    .ok { color: #166534; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    th { font-size: 0.75rem; text-transform: uppercase; color: #64748b; }
+    .act {
+      padding: 5px 10px; margin-right: 4px; border-radius: 6px;
+      border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-size: 0.78rem;
+    }
+    .act:hover { background: #f1f5f9; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MediAssist AI - Manage Doctors</h1>
+    <div>
+      <a href="/staff">Bookings</a>
+      <a href="#" id="logout">Log out</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="panel">
+      <h2 id="formTitle">Add a doctor</h2>
+      <form id="form">
+        <div class="grid">
+          <div>
+            <label for="fName">Full name</label>
+            <input id="fName" type="text" placeholder="Dr. Meera Das" required>
+          </div>
+          <div>
+            <label for="fDept">Department</label>
+            <select id="fDept" required></select>
+          </div>
+          <div>
+            <label for="fQual">Qualification</label>
+            <input id="fQual" type="text" placeholder="MBBS, MD">
+          </div>
+          <div>
+            <label for="fDays">Available days</label>
+            <input id="fDays" type="text" placeholder="Mon, Wed, Fri" required>
+          </div>
+          <div>
+            <label for="fTime">Available time</label>
+            <input id="fTime" type="text" placeholder="10:00 AM - 1:00 PM" required>
+          </div>
+        </div>
+        <p class="hint">
+          Days: <b>Mon, Wed, Fri</b> or <b>Mon to Sat</b>. Time: <b>10:00 AM - 1:00 PM</b>.
+          The booking system reads these exact formats.
+        </p>
+        <div class="buttons">
+          <button class="primary" id="saveBtn" type="submit">Add doctor</button>
+          <button class="secondary" id="cancelBtn" type="button" style="display:none;">Cancel edit</button>
+        </div>
+        <p id="msg"></p>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>Doctors</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th><th>Department</th><th>Qualification</th>
+              <th>Days</th><th>Time</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById("form");
+    const msgEl = document.getElementById("msg");
+    const rowsEl = document.getElementById("rows");
+    const fName = document.getElementById("fName");
+    const fDept = document.getElementById("fDept");
+    const fQual = document.getElementById("fQual");
+    const fDays = document.getElementById("fDays");
+    const fTime = document.getElementById("fTime");
+    const saveBtn = document.getElementById("saveBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const formTitle = document.getElementById("formTitle");
+
+    let editingId = null;
+
+    function showMessage(text, isError) {
+      msgEl.textContent = text;
+      msgEl.className = isError ? "error" : "ok";
+    }
+
+    async function api(url, options) {
+      const response = await fetch(url, options);
+      if (response.status === 401) {
+        window.location.href = "/staff/login";
+        throw new Error("Not logged in");
+      }
+      if (response.status === 403) {
+        window.location.href = "/staff";
+        throw new Error("Not allowed");
+      }
+      return response;
+    }
+
+    function makeCell(text) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      return td;
+    }
+
+    function makeButton(label, onClick) {
+      const b = document.createElement("button");
+      b.className = "act";
+      b.type = "button";
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    function resetForm() {
+      editingId = null;
+      form.reset();
+      formTitle.textContent = "Add a doctor";
+      saveBtn.textContent = "Add doctor";
+      cancelBtn.style.display = "none";
+    }
+
+    function startEdit(d) {
+      editingId = d.id;
+      fName.value = d.full_name;
+      fDept.value = d.department_id;
+      fQual.value = d.qualification || "";
+      fDays.value = d.available_days || "";
+      fTime.value = d.available_time || "";
+      formTitle.textContent = "Edit doctor";
+      saveBtn.textContent = "Save changes";
+      cancelBtn.style.display = "inline-block";
+      showMessage("", false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    async function removeDoctor(d) {
+      if (!confirm("Delete " + d.full_name + "?")) return;
+      const response = await api("/staff/api/manage/doctors/" + d.id, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) {
+        showMessage(data.detail || "Could not delete.", true);
+        return;
+      }
+      showMessage(d.full_name + " deleted.", false);
+      if (editingId === d.id) resetForm();
+      loadDoctors();
+    }
+
+    async function loadDoctors() {
+      const response = await api("/staff/api/manage/doctors");
+      const doctors = await response.json();
+      rowsEl.innerHTML = "";
+      doctors.forEach((d) => {
+        const tr = document.createElement("tr");
+        tr.appendChild(makeCell(d.full_name));
+        tr.appendChild(makeCell(d.department));
+        tr.appendChild(makeCell(d.qualification || ""));
+        tr.appendChild(makeCell(d.available_days || ""));
+        tr.appendChild(makeCell(d.available_time || ""));
+        const actions = document.createElement("td");
+        actions.appendChild(makeButton("Edit", () => startEdit(d)));
+        actions.appendChild(makeButton("Delete", () => removeDoctor(d)));
+        tr.appendChild(actions);
+        rowsEl.appendChild(tr);
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      showMessage("", false);
+      saveBtn.disabled = true;
+
+      const payload = {
+        full_name: fName.value,
+        department_id: parseInt(fDept.value, 10),
+        qualification: fQual.value,
+        available_days: fDays.value,
+        available_time: fTime.value,
+      };
+
+      const url = editingId
+        ? "/staff/api/manage/doctors/" + editingId
+        : "/staff/api/manage/doctors";
+
+      try {
+        const response = await api(url, {
+          method: editingId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          showMessage(data.detail || "Could not save.", true);
+        } else {
+          showMessage(editingId ? "Doctor updated." : "Doctor added.", false);
+          resetForm();
+          loadDoctors();
+        }
+      } catch (err) {
+        /* redirect already handled in api() */
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    cancelBtn.addEventListener("click", () => { resetForm(); showMessage("", false); });
+
+    document.getElementById("logout").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await fetch("/staff/logout", { method: "POST" });
+      window.location.href = "/staff/login";
+    });
+
+    async function init() {
+      const departments = await (await api("/staff/api/manage/departments")).json();
+      departments.forEach((dep) => {
+        const opt = document.createElement("option");
+        opt.value = dep.id;
+        opt.textContent = dep.name;
+        fDept.appendChild(opt);
+      });
+      loadDoctors();
+    }
+
+    init();
+  </script>
+</body>
+</html>
